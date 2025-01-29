@@ -16,9 +16,11 @@ connection_string = (
 )
 engine = create_engine(connection_string)
 Session = sessionmaker(bind=engine)
+
+# create a queue which will handle database actions
 action_queue = queue.Queue()
 
-
+# database objects (ORM)
 class Base(DeclarativeBase):
     def __repr__(self):
         return f"<{self.__class__.__name__}({self.id})>"
@@ -62,6 +64,7 @@ class Color(Base):
     def rgb(self):
         return self.red, self.green, self.blue
 
+# a function which will run in its own thread to constantly pop items from the action queue
 def db_handler():
     sql = Session()
     while True:
@@ -69,22 +72,14 @@ def db_handler():
         if command == 'STOP':
             break
         try:
+            # try to run the command on the session with the specified args
             result = command(sql, *args)
+            # put the result to the result queue
             result_queue.put(result)
         except Exception as e:
+            # if something went weird, put the error to the result queue
             result_queue.put(e)
 
-def main():
-    db_thread = threading.Thread(target=db_handler)
-    db_thread.start()
-
-    # Start a user-connected thread
-    user_thread = threading.Thread(target=user_thread_function, args=('some_data',))
-    user_thread.start()
-
-    # Stop the DBThread when done
-    action_queue.put(('STOP', None, None))
-    db_thread.join()
 
 def send_command_to_db(command, *args):
     result_queue = queue.Queue()
@@ -95,30 +90,24 @@ def example_command(session, data):
     return session.query(Thing).all()
 
 def user_thread_function(data):
+    # how to attach this to the end connection?
     result = send_command_to_db(example_command, data)
     print(result)
 
+def main():
 
+    # attach a thread to the db handler and start it
+    db_thread = threading.Thread(target=db_handler)
+    db_thread.start()
 
+    # Start a user-connected thread
+    # (how to attach to the end connection? socket or whatever)
+    user_thread = threading.Thread(target=user_thread_function, args=('some_data',))
+    user_thread.start()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # Stop the DBThread when done
+    action_queue.put(('STOP', None, None))
+    db_thread.join()
 
 if __name__=='__main__':
     main()
